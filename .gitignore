@@ -1,0 +1,13 @@
+/.idea
+.DS_Store
+.idea
+/node_modules/
+/target/
+/build/
+/deploy/
+*/dist/
+/coverage/
+*.tmp*
+.cache
+*.hidden*
+.DS_Store

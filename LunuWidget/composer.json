@@ -1,0 +1,32 @@
+{
+    "name": "lunu/shopware6-widget",
+    "description": "Lunu Widget",
+    "version": "0.0.8",
+    "type": "shopware-platform-plugin",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Lunu Solutions GmbH"
+        }
+    ],
+    "require": {
+        "shopware/core": "6.4.*"
+    },
+    "extra": {
+        "shopware-plugin-class": "Lunu\\Widget\\LunuWidget",
+        "plugin-icon": "src/Resources/config/lunu.png",
+        "label": {
+            "de-DE": "Lunu Widget",
+            "en-GB": "Lunu Widget"
+        },
+        "description": {
+            "de-DE": "Akzeptieren Sie Zahlungen in Kryptowährungen",
+            "en-GB": "Accept payments in cryptocurrencies"
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Lunu\\Widget\\": "src/"
+        }
+    }
+}

@@ -1,0 +1,22 @@
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://docs.shopware.com/schema/config.xsd">
+    <card>
+        <title>Minimal configuration</title>
+        <input-field>
+            <name>appID</name>
+            <label>App ID</label>
+            <helpText>Enter your App ID</helpText>
+            <required>true</required>
+        </input-field>
+        <input-field>
+            <name>apiSecret</name>
+            <label>API Secret</label>
+            <helpText>Enter your API Secret</helpText>
+            <required>true</required>
+        </input-field>
+        <input-field type="checkbox">
+            <name>sandboxMode</name>
+            <label>Sandbox mode</label>
+            <helpText>Turn on for sandbox mode testing.</helpText>
+        </input-field>
+    </card>
+</config>
