@@ -1,16 +1,26 @@
 {
     "name": "lunu/shopware6-widget",
-    "description": "Lunu Widget",
-    "version": "0.0.8",
+    "description": "Accept cryptocurrency payments in your Shopware 6 store with Lunu payment gateway",
+    "version": "1.0.0",
     "type": "shopware-platform-plugin",
     "license": "MIT",
+    "keywords": ["shopware-plugin", "payment", "cryptocurrency", "bitcoin", "ethereum", "crypto"],
+    "homepage": "https://lunu.io",
+    "support": {
+        "email": "support@lunu.io",
+        "source": "https://gitlab.lunu.io/widget/shopware-6",
+        "docs": "https://lunu.io/docs"
+    },
     "authors": [
         {
-            "name": "Lunu Solutions GmbH"
+            "name": "Lunu Solutions GmbH",
+            "email": "support@lunu.io",
+            "homepage": "https://lunu.io"
         }
     ],
     "require": {
-        "shopware/core": "6.4.*"
+        "php": ">=7.4",
+        "shopware/core": "~6.4.0 || ~6.5.0 || ~6.6.0"
     },
     "extra": {
         "shopware-plugin-class": "Lunu\\Widget\\LunuWidget",
@@ -20,8 +30,16 @@
             "en-GB": "Lunu Widget"
         },
         "description": {
-            "de-DE": "Akzeptieren Sie Zahlungen in Kryptowährungen",
-            "en-GB": "Accept payments in cryptocurrencies"
+            "de-DE": "Akzeptieren Sie Zahlungen in Kryptowährungen wie Bitcoin, Ethereum und mehr über das Lunu Payment Gateway",
+            "en-GB": "Accept payments in cryptocurrencies like Bitcoin, Ethereum and more through the Lunu payment gateway"
+        },
+        "manufacturerLink": {
+            "de-DE": "https://lunu.io",
+            "en-GB": "https://lunu.io"
+        },
+        "supportLink": {
+            "de-DE": "https://lunu.io/support",
+            "en-GB": "https://lunu.io/support"
         }
     },
     "autoload": {
