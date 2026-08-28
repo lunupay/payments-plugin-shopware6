@@ -30,7 +30,6 @@ class LunuPayment implements AsynchronousPaymentHandlerInterface
     private string $appId;
     private string $apiSecret;
     private string $apiUrl;
-    private string $widgetVersion;
     private string $authToken;
     private string $widgetURL;
 
@@ -55,10 +54,9 @@ class LunuPayment implements AsynchronousPaymentHandlerInterface
         $isSandboxEnabled = $this->systemConfigService->get('LunuWidget.config.sandboxMode');
         $this->appId = $this->systemConfigService->get('LunuWidget.config.appID');
         $this->apiSecret = $this->systemConfigService->get('LunuWidget.config.apiSecret');
-        $this->widgetVersion = $isSandboxEnabled ? 'sandbox' : 'alpha';
-        $this->apiUrl = 'https://' . ($isSandboxEnabled ? 'api.sandbox' : 'api') . '.lunupay.com/api/v1/payments/';
+        $this->apiUrl = 'https://' . ($isSandboxEnabled ? 'api.sandbox' : 'api') . '.lunupay.com/legacy-api/v1/payments/';
         $this->authToken = base64_encode($this->appId . ':' . $this->apiSecret);
-        $this->widgetURL = 'https://widget' . ($isSandboxEnabled ? '.sandbox' : '') . '.lunupay.com/#/?';
+        $this->widgetURL = 'https://widget' . ($isSandboxEnabled ? '.sandbox' : '') . '.lunupay.com/?';
     }
 
     /**
@@ -126,23 +124,22 @@ class LunuPayment implements AsynchronousPaymentHandlerInterface
             }
 
             $response = $data['response'];
-            $confirmationToken = $response['confirmation_token'] ?? null;
-            
-            if (empty($confirmationToken)) {
-                $this->logger->error('Lunu payment creation failed: Missing confirmation token', [
+            $lunuPaymentId = $response['id'] ?? null;
+
+            if (empty($lunuPaymentId)) {
+                $this->logger->error('Lunu payment creation failed: Missing payment id', [
                     'order_id' => $orderId
                 ]);
                 throw new AsyncPaymentProcessException(
                     $transaction->getOrderTransaction()->getId(),
-                    'Payment creation failed: Missing confirmation token'
+                    'Payment creation failed: Missing payment id'
                 );
             }
 
             // Redirect to external gateway
             $redirectUrl = $this->widgetURL . http_build_query([
-                'action' => 'select',
-                'token' => $confirmationToken,
-                'success' => $callbackUrl . '&state=success&orderID=' . $response['id'],
+                'order_id' => $lunuPaymentId,
+                'success' => $callbackUrl . '&state=success&orderID=' . $lunuPaymentId,
                 'cancel' => $callbackUrl . '&cancel=true'
             ]);
 
