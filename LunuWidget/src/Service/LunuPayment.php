@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lunu\Widget\Service;
 
+use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Payment\Cart\AsyncPaymentTransactionStruct;
 use Shopware\Core\Checkout\Payment\Cart\PaymentHandler\AsynchronousPaymentHandlerInterface;
 use Shopware\Core\Checkout\Payment\Exception\AsyncPaymentProcessException;
@@ -15,157 +16,170 @@ use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 
+/**
+ * Lunu Payment Handler for Shopware 6
+ * 
+ * Handles cryptocurrency payments through the Lunu payment gateway.
+ * Supports both production and sandbox modes.
+ */
 class LunuPayment implements AsynchronousPaymentHandlerInterface
 {
     private OrderTransactionStateHandler $transactionStateHandler;
+    private SystemConfigService $systemConfigService;
+    private LoggerInterface $logger;
     private string $appId;
     private string $apiSecret;
     private string $apiUrl;
-    private string $widgetVersion;
-    private string $auth_token;
+    private string $authToken;
     private string $widgetURL;
 
-    public function __construct(OrderTransactionStateHandler $transactionStateHandler, SystemConfigService $systemConfigService)
-    {
+    /**
+     * @param OrderTransactionStateHandler $transactionStateHandler
+     * @param SystemConfigService $systemConfigService
+     * @param LoggerInterface $logger
+     */
+    public function __construct(
+        OrderTransactionStateHandler $transactionStateHandler, 
+        SystemConfigService $systemConfigService,
+        LoggerInterface $logger
+    ) {
         $this->transactionStateHandler = $transactionStateHandler;
         $this->systemConfigService = $systemConfigService;
+        $this->logger = $logger;
 
-        if(null === $this->systemConfigService->get('LunuWidget.config.appID') || null === $this->systemConfigService->get('LunuWidget.config.apiSecret')) {
+        if (null === $this->systemConfigService->get('LunuWidget.config.appID') || null === $this->systemConfigService->get('LunuWidget.config.apiSecret')) {
             return;
         }
         
-        $is_sandbox_enabled = $this->systemConfigService->get("LunuWidget.config.sandboxMode");
+        $isSandboxEnabled = $this->systemConfigService->get('LunuWidget.config.sandboxMode');
         $this->appId = $this->systemConfigService->get('LunuWidget.config.appID');
         $this->apiSecret = $this->systemConfigService->get('LunuWidget.config.apiSecret');
-        $this->widgetVersion = $is_sandbox_enabled ? 'testing' : 'alpha';
-        $this->apiURL = 'https://' . ($is_sandbox_enabled ? 'api.testing' : 'api') . '.lunu.io/api/v1/payments/';
-        $this->auth_token = base64_encode($this->appId . ':' . $this->apiSecret);
-        $this->widgetURL = 'https://widget' . ($is_sandbox_enabled ? '.testing' : '') . '.lunu.io/#/?';
+        $this->apiUrl = 'https://' . ($isSandboxEnabled ? 'api.sandbox' : 'api') . '.lunupay.com/legacy-api/v1/payments/';
+        $this->authToken = base64_encode($this->appId . ':' . $this->apiSecret);
+        $this->widgetURL = 'https://widget' . ($isSandboxEnabled ? '.sandbox' : '') . '.lunupay.com/?';
     }
 
     /**
+     * Initiates the payment process by creating a Lunu payment and redirecting to the payment widget
+     * 
+     * @param AsyncPaymentTransactionStruct $transaction
+     * @param RequestDataBag $dataBag
+     * @param SalesChannelContext $salesChannelContext
+     * @return RedirectResponse
      * @throws AsyncPaymentProcessException
      */
     public function pay(AsyncPaymentTransactionStruct $transaction, RequestDataBag $dataBag, SalesChannelContext $salesChannelContext): RedirectResponse
     {
-        $order_id = $transaction->getOrder()->getOrderNumber();
-        $order_amount = $transaction->getOrder()->getPrice()->getTotalPrice();
-        $client_currency = $salesChannelContext->getCurrency()->getIsoCode();
-        $callback_url = $transaction->getReturnUrl();
-        $payment_description = 'Order #' . $order_id;
-        $customer_email = $salesChannelContext->getCustomer()->getEmail();
-        /*$idempotence_key = 'sw6_' . time() . '_' . $order_id;
-        $lunu_pay_url_create = 'https://' . $lunu_processing_version . '.lunu.io/api/v1/payments/create';
+        $orderId = $transaction->getOrder()->getOrderNumber();
+        $orderAmount = $transaction->getOrder()->getPrice()->getTotalPrice();
+        $clientCurrency = $salesChannelContext->getCurrency()->getIsoCode();
+        $callbackUrl = $transaction->getReturnUrl();
+        $paymentDescription = 'Order #' . $orderId;
+        $customerEmail = $salesChannelContext->getCustomer()->getEmail();
 
-        $ch = curl_init($lunu_pay_url_create);
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(array(
-            'shop_order_id' => $order_id,
-            'email' => $customer_email,
-            'amount' => $order_amount, // client_amount is not accepted in testing?
-        // in testing, cannot send client_amount and client_currency, get the error:
-        // {"error":{"code":99,"message":"Only one of `amount` or `client_amount` should be given at a time"}}
-        
-        // if sending only "client_amount", the following error is returned by Lunu API;
-        // "code":99,"message":"`client_currency` should be provided with `client_amount`"
-            'client_currency' => $client_currency,
-            'description' => $payment_description,
-            'expires' => date("c", time() + 3600) // 1 hour
-        )));
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, array(
-            'Authorization: Basic ' . $auth_token,
-            'Idempotence-Key: ' . $idempotence_key,
-            'Content-Type: application/json'
-        ));
-        $responseBody = curl_exec($ch);
-        $responseHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if ($responseHttpCode !== 200) {
-            echo "Response code is invalid<br/>";
-            var_dump(array(
-                'url' => $lunu_pay_url_create,
-                'code' => $responseHttpCode,
-                'body' => $responseBody
-            ));
-            exit;
+        $requestParams = [
+            'shop_order_id' => $orderId,
+            'email' => $customerEmail,
+            'amount' => $orderAmount,
+            'client_currency' => $clientCurrency,
+            'description' => $paymentDescription,
+            'expires' => date('c', time() + 3600) // 1 hour
+        ];
+
+        try {
+            $data = $this->lunuRequest('create', $requestParams, $this->getHeaders($orderId));
+
+            if (!is_array($data)) {
+                $this->logger->error('Lunu payment creation failed: Invalid response format', [
+                    'order_id' => $orderId
+                ]);
+                throw new AsyncPaymentProcessException(
+                    $transaction->getOrderTransaction()->getId(),
+                    'Payment creation failed: Invalid response format'
+                );
+            }
+
+            if (isset($data['error']) && is_array($data['error'])) {
+                $errorMessage = $data['error']['message'] ?? 'Unknown error';
+                $errorCode = $data['error']['code'] ?? 'N/A';
+                $this->logger->error('Lunu API error', [
+                    'order_id' => $orderId,
+                    'error_code' => $errorCode,
+                    'error_message' => $errorMessage
+                ]);
+                throw new AsyncPaymentProcessException(
+                    $transaction->getOrderTransaction()->getId(),
+                    sprintf('Payment creation failed: %s (Code: %s)', $errorMessage, $errorCode)
+                );
+            }
+
+            if (!isset($data['response']) || !is_array($data['response'])) {
+                $this->logger->error('Lunu payment creation failed: Empty response', [
+                    'order_id' => $orderId
+                ]);
+                throw new AsyncPaymentProcessException(
+                    $transaction->getOrderTransaction()->getId(),
+                    'Payment creation failed: Empty response from payment gateway'
+                );
+            }
+
+            $response = $data['response'];
+            $lunuPaymentId = $response['id'] ?? null;
+
+            if (empty($lunuPaymentId)) {
+                $this->logger->error('Lunu payment creation failed: Missing payment id', [
+                    'order_id' => $orderId
+                ]);
+                throw new AsyncPaymentProcessException(
+                    $transaction->getOrderTransaction()->getId(),
+                    'Payment creation failed: Missing payment id'
+                );
+            }
+
+            // Redirect to external gateway
+            $redirectUrl = $this->widgetURL . http_build_query([
+                'order_id' => $lunuPaymentId,
+                'success' => $callbackUrl . '&state=success&orderID=' . $lunuPaymentId,
+                'cancel' => $callbackUrl . '&cancel=true'
+            ]);
+
+            return new RedirectResponse($redirectUrl);
+        } catch (AsyncPaymentProcessException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            $this->logger->error('Unexpected error during Lunu payment creation', [
+                'order_id' => $orderId,
+                'exception' => $e->getMessage()
+            ]);
+            throw new AsyncPaymentProcessException(
+                $transaction->getOrderTransaction()->getId(),
+                'Payment creation failed: ' . $e->getMessage()
+            );
         }
-        $data = json_decode($responseBody, true);*/
-
-
-        $requestParams = array(
-            'shop_order_id' => $order_id,
-            'email' => $customer_email,
-            'amount' => $order_amount,
-            'client_currency' => $client_currency,
-            'description' => $payment_description,
-            'expires' => date("c", time() + 3600) // 1 hour
-        );
-
-        $data = $this->lunuRequest("create", $requestParams, $this->getHeaders($order_id));
-
-        if (!is_array($data)) {
-            echo "Response body is invalid<br/>";
-            var_dump(array(
-                'url' => $lunu_pay_url_create,
-                'code' => $responseHttpCode,
-                'body' => $responseBody
-            ));
-            exit;
-        }
-        if (isset($data['error']) && is_array($data['error'])) { // "is_array" alone causes error
-            echo "Processing error:<br/>";
-            var_dump(array(
-                'url' => $lunu_pay_url_create,
-                'code' => $responseHttpCode,
-                'body' => $responseBody,
-                'error' => $data['error'],
-            ));
-            exit;
-        }
-        if (!is_array($data['response'])) {
-            echo "Response is empty<br/>";
-            var_dump(array(
-                'url' => $lunu_pay_url_create,
-                'code' => $responseHttpCode,
-                'body' => $responseBody
-            ));
-            exit;
-        }
-        $response = $data['response'];
-        $confirmation_token = $response['confirmation_token'];
-        if (empty($confirmation_token)) {
-            echo "confirmation_token is empty<br/>";
-            var_dump(array(
-                'url' => $lunu_pay_url_create,
-                'code' => $responseHttpCode,
-                'body' => $responseBody
-            ));
-            exit;
-        }
-
-        // Redirect to external gateway
-        $redirectUrl = ($this->widgetURL .
-            http_build_query(array(
-                'action' => 'select',
-                'token' => $confirmation_token,
-                'success' => $callback_url . '&state=success&orderID=' . $response['id'],
-                'cancel' => $callback_url . '&cancel=true'
-            )));
-
-        return new RedirectResponse($redirectUrl);
     }
 
     /**
+     * Finalizes the payment after customer returns from Lunu payment widget
+     * 
+     * @param AsyncPaymentTransactionStruct $transaction
+     * @param Request $request
+     * @param SalesChannelContext $salesChannelContext
+     * @return void
      * @throws CustomerCanceledAsyncPaymentException
+     * @throws AsyncPaymentProcessException
      */
     public function finalize(AsyncPaymentTransactionStruct $transaction, Request $request, SalesChannelContext $salesChannelContext): void
     {
         $transactionId = $transaction->getOrderTransaction()->getId();
         $context = $salesChannelContext->getContext();
+        $orderNumber = $transaction->getOrder()->getOrderNumber();
 
-        // Check if the user has cancelled.
+        // Check if the user has cancelled
         if ($request->query->getBoolean('cancel')) {
+            $this->logger->info('Customer canceled Lunu payment', [
+                'order_number' => $orderNumber,
+                'transaction_id' => $transactionId
+            ]);
             throw new CustomerCanceledAsyncPaymentException(
                 $transactionId,
                 'Customer canceled the payment on the Lunu page'
@@ -173,41 +187,145 @@ class LunuPayment implements AsynchronousPaymentHandlerInterface
         }
 
         $paymentState = $request->query->getAlpha('state');
+        $lunuOrderId = $request->query->get('orderID');
 
         if ($paymentState === 'success') {
-            $data = $this->lunuRequest("get/" . $request->query->get('orderID'), null, $this->getHeaders($transaction->getOrder()->getOrderNumber()));
-            $response = $data['response'];
+            try {
+                if (empty($lunuOrderId)) {
+                    throw new AsyncPaymentProcessException(
+                        $transactionId,
+                        'Payment verification failed: Missing order ID from payment gateway'
+                    );
+                }
 
-            if($response['shop_order_id'] === $transaction->getOrder()->getOrderNumber()) {
-                $this->transactionStateHandler->paid($transactionId, $context);
+                $data = $this->lunuRequest('get/' . $lunuOrderId, null, $this->getHeaders($orderNumber));
+
+                if (!isset($data['response']) || !is_array($data['response'])) {
+                    $this->logger->error('Lunu payment verification failed: Invalid response', [
+                        'order_number' => $orderNumber,
+                        'lunu_order_id' => $lunuOrderId
+                    ]);
+                    throw new AsyncPaymentProcessException(
+                        $transactionId,
+                        'Payment verification failed: Invalid response from payment gateway'
+                    );
+                }
+
+                $response = $data['response'];
+
+                if ($response['shop_order_id'] === $orderNumber) {
+                    $this->transactionStateHandler->paid($transactionId, $context);
+                    $this->logger->info('Lunu payment completed successfully', [
+                        'order_number' => $orderNumber,
+                        'lunu_order_id' => $lunuOrderId
+                    ]);
+                } else {
+                    $this->logger->error('Lunu payment verification failed: Order ID mismatch', [
+                        'expected_order_number' => $orderNumber,
+                        'received_order_number' => $response['shop_order_id'] ?? 'null',
+                        'lunu_order_id' => $lunuOrderId
+                    ]);
+                    throw new AsyncPaymentProcessException(
+                        $transactionId,
+                        'Payment verification failed: Order ID mismatch'
+                    );
+                }
+            } catch (AsyncPaymentProcessException $e) {
+                throw $e;
+            } catch (\Exception $e) {
+                $this->logger->error('Unexpected error during Lunu payment finalization', [
+                    'order_number' => $orderNumber,
+                    'exception' => $e->getMessage()
+                ]);
+                throw new AsyncPaymentProcessException(
+                    $transactionId,
+                    'Payment verification failed: ' . $e->getMessage()
+                );
             }
         }
     }
 
-    private function lunuRequest($method, $data, $headers) {
-        $ch = curl_init($this->apiURL . $method);
-        if(!empty($data)) {
+    /**
+     * Makes a request to the Lunu API
+     * 
+     * @param string $method API endpoint method
+     * @param array|null $data Request payload
+     * @param array $headers HTTP headers
+     * @return array Response data
+     * @throws AsyncPaymentProcessException
+     */
+    private function lunuRequest(string $method, ?array $data, array $headers): array
+    {
+        $url = $this->apiUrl . $method;
+        $ch = curl_init($url);
+        
+        if (!empty($data)) {
             curl_setopt($ch, CURLOPT_POST, true);
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
         } else {
             curl_setopt($ch, CURLOPT_HTTPGET, true);
         }
+        
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        
         $responseBody = curl_exec($ch);
         $responseHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
-        if ($responseHttpCode !== 200) {
-            throw new AsyncPaymentProcessException('TransactionId', 'Invalid HTTP response code: ' . $responseHttpCode);
+        
+        if ($responseBody === false) {
+            $this->logger->error('Lunu API request failed', [
+                'url' => $url,
+                'error' => $curlError
+            ]);
+            throw new AsyncPaymentProcessException(
+                'unknown',
+                'Failed to communicate with payment gateway: ' . $curlError
+            );
         }
-        return json_decode($responseBody, true);
+        
+        if ($responseHttpCode !== 200) {
+            $this->logger->error('Lunu API returned non-200 status code', [
+                'url' => $url,
+                'status_code' => $responseHttpCode,
+                'response' => $responseBody
+            ]);
+            throw new AsyncPaymentProcessException(
+                'unknown',
+                sprintf('Payment gateway returned error status: %d', $responseHttpCode)
+            );
+        }
+        
+        $decodedResponse = json_decode($responseBody, true);
+        
+        if (!is_array($decodedResponse)) {
+            $this->logger->error('Lunu API returned invalid JSON', [
+                'url' => $url,
+                'response' => $responseBody
+            ]);
+            throw new AsyncPaymentProcessException(
+                'unknown',
+                'Payment gateway returned invalid response format'
+            );
+        }
+        
+        return $decodedResponse;
     }
 
-    private function getHeaders($order_id) {
-        return array(
-            'Authorization: Basic ' . $this->auth_token,
-            'Idempotence-Key: ' . 'sw6_' . time() . '_' . $order_id,
+    /**
+     * Generates HTTP headers for Lunu API requests
+     * 
+     * @param string $orderId Shop order ID for idempotency key
+     * @return array HTTP headers
+     */
+    private function getHeaders(string $orderId): array
+    {
+        return [
+            'Authorization: Basic ' . $this->authToken,
+            'Idempotence-Key: sw6_' . time() . '_' . $orderId,
             'Content-Type: application/json'
-        );
+        ];
     }
 }
